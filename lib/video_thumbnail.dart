@@ -92,6 +92,7 @@ class VideoThumbnail {
       'maxw': maxWidth,
       'timeMs': timeMs,
       'quality': quality,
+      'numbers': numbers,
     };
     return await _channel.invokeMethod('datas', reqMap);
   }
