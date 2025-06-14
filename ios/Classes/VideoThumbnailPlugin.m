@@ -54,12 +54,23 @@
         });
     }
     else if ([@"datas" isEqualToString:call.method]) {
-        
         dispatch_async(dispatch_get_global_queue( DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(void){
             //Background Thread
             NSArray *thumbnails = [VideoThumbnailPlugin generateThumbnails:url headers:headers format:format maxHeight:maxh maxWidth:maxw timeMs:timeMs quality:quality numbers:numbers];
+            
+            // 将NSData数组转换为Flutter可以识别的格式
+            NSMutableArray *flutterThumbnails = [NSMutableArray array];
+            for (NSData *data in thumbnails) {
+                if (data) {
+                    FlutterStandardTypedData *flutterData = [FlutterStandardTypedData typedDataWithBytes:data];
+                    [flutterThumbnails addObject:flutterData];
+                } else {
+                    [flutterThumbnails addObject:[NSNull null]];
+                }
+            }
+            
             dispatch_async(dispatch_get_main_queue(), ^{
-                result(thumbnails);
+                result(flutterThumbnails);
             });
         });
     }
@@ -210,13 +221,13 @@
     Float64 duration = CMTimeGetSeconds(asset.duration);
     Float64 interval = duration / (numbers + 1);
     
-    for (int i = 1; i <= numbers; i++) {
-        Float64 time = interval * i;
+    for (int i = 0; i < numbers; i++) {
+        
         NSError *error = nil;
-        CGImageRef cgImage = [imgGenerator copyCGImageAtTime:CMTimeMake(time * 1000, 1000) actualTime:nil error:&error];
+        CGImageRef cgImage = [imgGenerator copyCGImageAtTime:CMTimeMake(timeMs + 1000 * i, 1000) actualTime:nil error:&error];
         
         if (error != nil) {
-            NSLog(@"couldn't generate thumbnail at time %f, error:%@", time, error);
+            NSLog(@"couldn't generate thumbnail at time %f, error:%@", timeMs, error);
             continue;
         }
         

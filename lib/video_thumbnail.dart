@@ -75,7 +75,7 @@ class VideoThumbnail {
     return await _channel.invokeMethod('data', reqMap);
   }
 
-  static Future<List<Uint8List?>> thumbnailDatas({
+  static Future<List<Uint8List?>?> thumbnailDatas({
     required String video,
     Map<String, String>? headers,
     ImageFormat imageFormat = ImageFormat.PNG,
@@ -96,6 +96,6 @@ class VideoThumbnail {
       'quality': quality,
       'numbers': numbers,
     };
-    return await _channel.invokeMethod('datas', reqMap);
+    return await _channel.invokeListMethod('datas', reqMap);
   }
 }
