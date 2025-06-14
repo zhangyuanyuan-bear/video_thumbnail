@@ -44,13 +44,25 @@
       ( [file hasPrefix:@"/"] ? [NSURL fileURLWithPath:file] : [NSURL URLWithString:file] );
     
     if ([@"data" isEqualToString:call.method]) {
-
         dispatch_async(dispatch_get_global_queue( DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(void){
             //Background Thread
-            result([VideoThumbnailPlugin generateThumbnail:url headers:headers format:format maxHeight:maxh maxWidth:maxw timeMs:timeMs quality:quality]);
+            NSData *thumbnail = [VideoThumbnailPlugin generateThumbnail:url headers:headers format:format maxHeight:maxh maxWidth:maxw timeMs:timeMs quality:quality];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                result(thumbnail);
+            });
         });
-        
-    } else if ([@"file" isEqualToString:call.method]) {
+    }
+    if ([@"datas" isEqualToString:call.method]) {
+        int numbers = [[_args objectForKey:@"numbers"] intValue];
+        dispatch_async(dispatch_get_global_queue( DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(void){
+            //Background Thread
+            NSArray *thumbnails = [VideoThumbnailPlugin generateThumbnails:url headers:headers format:format maxHeight:maxh maxWidth:maxw timeMs:timeMs quality:quality numbers:numbers];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                result(thumbnails);
+            });
+        });
+    }
+    else if ([@"file" isEqualToString:call.method]) {
         if( [path isEqual:[NSNull null]] && !isLocalFile ) {
             path = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) lastObject];
         }
@@ -72,22 +84,25 @@
             
             NSError *error = nil;
             if( [data writeToURL:thumbnail options:0 error:&error] != YES ) {
-                if( error != nil ) {
-                    result( [FlutterError errorWithCode:[NSString stringWithFormat:@"Error %ld", error.code]
-                                                message:error.domain
-                                                details:error.localizedDescription] );
-                } else result( [FlutterError errorWithCode:@"IO Error" message:@"Failed to write data to file" details:nil] );
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if( error != nil ) {
+                        result( [FlutterError errorWithCode:[NSString stringWithFormat:@"Error %ld", error.code]
+                                                    message:error.domain
+                                                    details:error.localizedDescription] );
+                    } else result( [FlutterError errorWithCode:@"IO Error" message:@"Failed to write data to file" details:nil] );
+                });
             } else {
                 NSString *fullpath = [thumbnail absoluteString];
-                if([fullpath hasPrefix:@"file://"]) {
-                    result([fullpath substringFromIndex:7]);
-                }
-                else {
-                    result(fullpath);
-                }
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if([fullpath hasPrefix:@"file://"]) {
+                        result([fullpath substringFromIndex:7]);
+                    }
+                    else {
+                        result(fullpath);
+                    }
+                });
             }
         });
-        
     } else {
         result(FlutterMethodNotImplemented);
     }
@@ -179,5 +194,101 @@
         return( data );
     }
 }
+
++ (NSArray *)generateThumbnails:(NSURL*)url headers:(NSMutableDictionary*)headers  format:(int)format maxHeight:(int)maxh maxWidth:(int)maxw timeMs:(int)timeMs quality:(int)quality numbers:(int)numbers {
+    
+    AVURLAsset *asset = [[AVURLAsset alloc] initWithURL:url options: [headers isEqual:[NSNull null]] ? nil : @{@"AVURLAssetHTTPHeaderFieldsKey" : headers}];
+    AVAssetImageGenerator *imgGenerator = [[AVAssetImageGenerator alloc] initWithAsset:asset];
+    
+    imgGenerator.appliesPreferredTrackTransform = YES;
+    imgGenerator.maximumSize = CGSizeMake((CGFloat)maxw, (CGFloat)maxh);
+    imgGenerator.requestedTimeToleranceBefore = kCMTimeZero;
+    imgGenerator.requestedTimeToleranceAfter = CMTimeMake(100, 1000);
+    
+    NSMutableArray *thumbnails = [NSMutableArray array];
+    Float64 duration = CMTimeGetSeconds(asset.duration);
+    Float64 interval = duration / (numbers + 1);
+    
+    for (int i = 1; i <= numbers; i++) {
+        Float64 time = interval * i;
+        NSError *error = nil;
+        CGImageRef cgImage = [imgGenerator copyCGImageAtTime:CMTimeMake(time * 1000, 1000) actualTime:nil error:&error];
+        
+        if (error != nil) {
+            NSLog(@"couldn't generate thumbnail at time %f, error:%@", time, error);
+            continue;
+        }
+        
+        if (format <= 1) {
+            UIImage *thumbnail = [UIImage imageWithCGImage:cgImage];
+            CGImageRelease(cgImage);
+            
+            NSData *imageData;
+            if (format == 0) {
+                CGFloat fQuality = (CGFloat)(quality * 0.01);
+                imageData = UIImageJPEGRepresentation(thumbnail, fQuality);
+            } else {
+                imageData = UIImagePNGRepresentation(thumbnail);
+            }
+            
+            if (imageData) {
+                [thumbnails addObject:imageData];
+            }
+        } else {
+            CGColorSpaceRef colorSpace = CGImageGetColorSpace(cgImage);
+            if (CGColorSpaceGetModel(colorSpace) != kCGColorSpaceModelRGB) {
+                CGImageRelease(cgImage);
+                continue;
+            }
+            
+            CGImageAlphaInfo ainfo = CGImageGetAlphaInfo(cgImage);
+            CGBitmapInfo binfo = CGImageGetBitmapInfo(cgImage);
+            
+            CGDataProviderRef dataProvider = CGImageGetDataProvider(cgImage);
+            CFDataRef imageData = CGDataProviderCopyData(dataProvider);
+            UInt8 *rawData = (UInt8 *)CFDataGetBytePtr(imageData);
+            
+            int width = (int)CGImageGetWidth(cgImage);
+            int height = (int)CGImageGetHeight(cgImage);
+            int stride = (int)CGImageGetBytesPerRow(cgImage);
+            size_t ret_size = 0;
+            uint8_t *output = NULL;
+            
+            if (ainfo == kCGImageAlphaPremultipliedFirst || ainfo == kCGImageAlphaNoneSkipFirst) {
+                if ((binfo & kCGBitmapByteOrderMask) == kCGBitmapByteOrder32Little) {
+                    if (quality == 100)
+                        ret_size = WebPEncodeLosslessBGRA(rawData, width, height, stride, &output);
+                    else
+                        ret_size = WebPEncodeBGRA(rawData, width, height, stride, (float)quality, &output);
+                } else if ((binfo & kCGBitmapByteOrderMask) == kCGBitmapByteOrder32Big) {
+                    for (int y = 0; y < height; y++) {
+                        uint32_t *p = (uint32_t *)(((uint8_t *)(rawData + y * stride)));
+                        for (int x = 0; x < width; x++, p++) {
+                            uint32_t u = *p;
+                            *p = ((u << 24) & 0xFF000000) | ((u >> 8) & 0x00FFFFFF);
+                        }
+                    }
+                    if (quality == 100)
+                        ret_size = WebPEncodeLosslessRGBA(rawData, width, height, stride, &output);
+                    else
+                        ret_size = WebPEncodeRGBA(rawData, width, height, stride, (float)quality, &output);
+                }
+            }
+            
+            CGDataProviderRelease(dataProvider);
+            CFRelease(imageData);
+            CGColorSpaceRelease(colorSpace);
+            CGImageRelease(cgImage);
+            
+            if (ret_size > 0) {
+                NSData *data = [NSData dataWithBytes:(const void *)output length:ret_size];
+                [thumbnails addObject:data];
+            }
+        }
+    }
+    
+    return thumbnails;
+}
+
 
 @end
