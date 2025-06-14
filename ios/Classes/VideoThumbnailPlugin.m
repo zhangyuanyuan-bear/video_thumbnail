@@ -37,6 +37,7 @@
     int maxw = [[_args objectForKey:@"maxw"] intValue];
     int timeMs = [[_args objectForKey:@"timeMs"] intValue];
     int quality = [[_args objectForKey:@"quality"] intValue];
+    int numbers = [[_args objectForKey:@"numbers"] intValue];
     _args = nil;
     bool isLocalFile = [file hasPrefix:@"file://"] || [file hasPrefix:@"/"];
     
@@ -53,7 +54,7 @@
         });
     }
     else if ([@"datas" isEqualToString:call.method]) {
-        int numbers = [[_args objectForKey:@"numbers"] intValue];
+        
         dispatch_async(dispatch_get_global_queue( DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(void){
             //Background Thread
             NSArray *thumbnails = [VideoThumbnailPlugin generateThumbnails:url headers:headers format:format maxHeight:maxh maxWidth:maxw timeMs:timeMs quality:quality numbers:numbers];

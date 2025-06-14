@@ -42,7 +42,8 @@ class VideoThumbnail {
       'maxh': maxHeight,
       'maxw': maxWidth,
       'timeMs': timeMs,
-      'quality': quality
+      'quality': quality,
+      'numbers': 1,
     };
     return await _channel.invokeMethod('file', reqMap);
   }
@@ -69,6 +70,7 @@ class VideoThumbnail {
       'maxw': maxWidth,
       'timeMs': timeMs,
       'quality': quality,
+      'numbers': 1,
     };
     return await _channel.invokeMethod('data', reqMap);
   }
